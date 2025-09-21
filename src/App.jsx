@@ -22,6 +22,83 @@ function generateIdeas({nights,persons,totalBudget,provinces}){
   return pool.slice(0,3).map((p,idx)=>{ const estimated=Math.round(Math.min(totalBudget, p.base*persons*nights*(tier==='premium'?1.8: tier==='comfort'?1.3:1))); return {id:idx+'-'+p.title, ...p, estCost:estimated} })
 }
 
+// --- Datum helpers (keuze → from/to) ---
+function toISO(d) {
+  // yyyy-mm-dd
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    .toISOString().slice(0,10);
+}
+
+function nextWeekday(date, weekday /* 0=zo..6=za */) {
+  const d = new Date(date);
+  const diff = (weekday + 7 - d.getDay()) % 7 || 7; // altijd vooruit, min. +1..+7
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function presetToRange(presetKey, now=new Date()) {
+  // Geeft {fromISO, toISO, label} terug
+  let from, to, label;
+
+  switch (presetKey) {
+    case "next-weekend": {
+      // vr (check-in) → zo (check-out) = 2 nachten
+      const nextFri = nextWeekday(now, 5);
+      const nextSun = nextWeekday(now, 0); // zondag
+      // Zorg dat zo ná vr valt (als zondag eerder is, pak zondag na die vrijdag)
+      if (nextSun <= nextFri) nextSun = addDays(nextSun, 7);
+      from = nextFri;
+      to   = nextSun;
+      label = "Volgend weekend (vr–zo)";
+      break;
+    }
+    case "this-weekend": {
+      // als we al voorbij zo zijn: val terug op volgend weekend
+      let fri = nextWeekday(addDays(now, -7), 5);
+      while (fri <= now) fri = addDays(fri, 7);
+      let sun = nextWeekday(addDays(now, -7), 0);
+      while (sun <= fri) sun = addDays(sun, 7);
+      from = fri; to = sun;
+      label = "Dit weekend (vr–zo)";
+      break;
+    }
+    case "two-weeks": {
+      const baseFri = addDays(nextWeekday(now, 5), 7); // vrijdag over 2 weken
+      from = baseFri;
+      to   = addDays(baseFri, 2); // tot zondag
+      label = "Over 2 weken (vr–zo)";
+      break;
+    }
+    case "long-weekend": {
+      // do (check-in) → zo (check-out) = 3 nachten
+      const nextThu = nextWeekday(now, 4);
+      from = nextThu;
+      to   = addDays(nextThu, 3);
+      label = "Lang weekend (do–zo)";
+      break;
+    }
+    case "midweek": {
+      // ma (check-in) → vr (check-out) = 4 nachten
+      const nextMon = nextWeekday(now, 1);
+      from = nextMon;
+      to   = addDays(nextMon, 4);
+      label = "Midweek (ma–vr)";
+      break;
+    }
+    default:
+      return null;
+  }
+
+  return { fromISO: toISO(from), toISO: toISO(to), label };
+}
+
+
 export default function App(){
   const [from,setFrom]=useState(''); const [to,setTo]=useState(''); const [budget,setBudget]=useState(''); const [persons,setPersons]=useState(2); const [selectedProvinces,setSelectedProvinces]=useState([]); const [submitted,setSubmitted]=useState(false)
 
@@ -38,13 +115,33 @@ export default function App(){
         <form onSubmit={submit} className='grid'>
           <div className='grid grid2'>
             <div>
-              <label>Van</label>
-              <input className='date' type='date' value={from} onChange={e=>setFrom(e.target.value)} />
-            </div>
-            <div>
-              <label>Tot</label>
-              <input className='date' type='date' value={to} onChange={e=>setTo(e.target.value)} />
-            </div>
+  <label>Periode</label>
+  <select
+    className='select'
+    defaultValue=""
+    onChange={(e) => {
+      const v = e.target.value;
+      if (!v) return;
+      const range = presetToRange(v);
+      if (range) {
+        setFrom(range.fromISO);
+        setTo(range.toISO);
+        setSubmitted(false); // reset resultaten bij wisselen
+      }
+    }}
+  >
+    <option value="" disabled>Kies een periode…</option>
+    <option value="this-weekend">Dit weekend (vr–zo)</option>
+    <option value="next-weekend">Volgend weekend (vr–zo)</option>
+    <option value="two-weeks">Over 2 weken (vr–zo)</option>
+    <option value="long-weekend">Lang weekend (do–zo)</option>
+    <option value="midweek">Midweek (ma–vr)</option>
+  </select>
+  <p className="helper" style={{marginTop:6}}>
+    Gekozen data: {from && to ? `${from} t/m ${to} (${daysBetween(from,to)} nacht${daysBetween(from,to)===1?'':'en'})` : '—'}
+  </p>
+</div>
+
           </div>
           <div>
             <label>Budget</label>
